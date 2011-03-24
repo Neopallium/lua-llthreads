@@ -28,7 +28,7 @@ local function detached_thread(...)
 end
 
 local function print_thread(...)
-	local thread = llthreads.new([[ return print("print_thread:", ...) ]], ...)
+	local thread = llthreads.new([[ print("print_thread:", ...); ]], ...)
 	-- start joinable thread
 	assert(thread:start())
 	return thread
@@ -43,11 +43,15 @@ end
 
 local thread1 = detached_thread("number:", 1234, "nil:", nil, "bool:", true)
 
+os.execute("sleep 1");
+
 local thread2 = print_thread("number:", 1234, "nil:", nil, "bool:", true)
-print(thread2:join())
+print("thread2:join: results # = ", select('#', thread2:join()))
+
+os.execute("sleep 1");
 
 local thread3 = pass_through_thread("number:", 1234, "nil:", nil, "bool:", true)
-print("resuls:", thread3:join())
+print("thread3:join:", thread3:join())
 
-os.execute("sleep 2");
+os.execute("sleep 1");
 
