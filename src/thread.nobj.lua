@@ -21,9 +21,9 @@
 local Lua_LLThread_type = [[
 typedef enum {
 	TSTATE_NONE     = 0,
-	TSTATE_STARTED  = 1<<1,
-	TSTATE_DETACHED = 1<<2,
-	TSTATE_JOINED   = 1<<3,
+	TSTATE_STARTED  = 1<<0,
+	TSTATE_DETACHED = 1<<1,
+	TSTATE_JOINED   = 1<<2,
 } Lua_TState;
 
 typedef struct Lua_LLThread_child {
@@ -293,7 +293,9 @@ static Lua_LLThread *llthread_create(lua_State *L, const char *code, size_t code
 ]],
 		c_source[[
 	if(${this}->state != TSTATE_NONE) {
-		return luaL_error(L, "Thread already started.");
+		lua_pushboolean(L, 0); /* false */
+		lua_pushliteral(L, "Thread already started.");
+		return 2;
 	}
 	if((rc = llthread_start(${this}, ${start_detached})) != 0) {
 		lua_pushboolean(L, 0); /* false */
@@ -312,13 +314,19 @@ static Lua_LLThread *llthread_create(lua_State *L, const char *code, size_t code
 ]],
 		c_source[[
 	if((${this}->state & TSTATE_STARTED) == 0) {
-		return luaL_error(L, "Can't join a thread that hasn't be started.");
+		lua_pushboolean(L, 0); /* false */
+		lua_pushliteral(L, "Can't join a thread that hasn't be started.");
+		return 2;
 	}
-	if((${this}->state & TSTATE_DETACHED) == 1) {
-		return luaL_error(L, "Can't join a thread that has been detached.");
+	if((${this}->state & TSTATE_DETACHED) == TSTATE_DETACHED) {
+		lua_pushboolean(L, 0); /* false */
+		lua_pushliteral(L, "Can't join a thread that has been detached.");
+		return 2;
 	}
-	if((${this}->state & TSTATE_JOINED) == 1) {
-		return luaL_error(L, "Can't join a thread that has already been joined.");
+	if((${this}->state & TSTATE_JOINED) == TSTATE_JOINED) {
+		lua_pushboolean(L, 0); /* false */
+		lua_pushliteral(L, "Can't join a thread that has already been joined.");
+		return 2;
 	}
 	/* join the thread. */
 	rc = llthread_join(${this});

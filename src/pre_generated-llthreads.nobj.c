@@ -633,9 +633,9 @@ static int nobj_try_loading_ffi(lua_State *L, const char *ffi_mod_name,
 
 typedef enum {
 	TSTATE_NONE     = 0,
-	TSTATE_STARTED  = 1<<1,
-	TSTATE_DETACHED = 1<<2,
-	TSTATE_JOINED   = 1<<3,
+	TSTATE_STARTED  = 1<<0,
+	TSTATE_DETACHED = 1<<1,
+	TSTATE_JOINED   = 1<<2,
 } Lua_TState;
 
 typedef struct Lua_LLThread_child {
@@ -827,7 +827,6 @@ static int llthread_move_values(lua_State *from_L, lua_State *to_L, int idx, int
 		}
 		++nvalues;
 	}
-printf("copied nvalues=%d, top=%d\n", nvalues, top);
 
 	return nvalues;
 }
@@ -904,14 +903,22 @@ static int Lua_LLThread__delete__meth(lua_State *L) {
 static int Lua_LLThread__start__meth(lua_State *L) {
   Lua_LLThread * this_idx1 = obj_type_Lua_LLThread_check(L,1);
   bool start_detached_idx2 = lua_toboolean(L,2);
-  int rc_idx1 = 0;
-	if(this_idx1->state != TSTATE_NONE) {
-		return luaL_error(L, "Thread already started.");
-	}
-printf("llthread_start(): start_detached=%d\n", start_detached_idx2);
-	rc_idx1 = llthread_start(this_idx1, start_detached_idx2);
+  bool res_idx1 = 0;
+	int rc;
 
-  lua_pushinteger(L, rc_idx1);
+	if(this_idx1->state != TSTATE_NONE) {
+		lua_pushboolean(L, 0); /* false */
+		lua_pushliteral(L, "Thread already started.");
+		return 2;
+	}
+	if((rc = llthread_start(this_idx1, start_detached_idx2)) != 0) {
+		lua_pushboolean(L, 0); /* false */
+		lua_pushstring(L, strerror(rc));
+		return 2;
+	}
+	res_idx1 = true;
+
+  lua_pushboolean(L, res_idx1);
   return 1;
 }
 
@@ -919,17 +926,24 @@ printf("llthread_start(): start_detached=%d\n", start_detached_idx2);
 static int Lua_LLThread__join__meth(lua_State *L) {
   Lua_LLThread * this_idx1 = obj_type_Lua_LLThread_check(L,1);
   bool res_idx1 = 0;
+  const char * err_msg_idx2 = NULL;
 	Lua_LLThread_child *child;
 	int rc;
 
 	if((this_idx1->state & TSTATE_STARTED) == 0) {
-		return luaL_error(L, "Can't join a thread that hasn't be started.");
+		lua_pushboolean(L, 0); /* false */
+		lua_pushliteral(L, "Can't join a thread that hasn't be started.");
+		return 2;
 	}
-	if((this_idx1->state & TSTATE_DETACHED) == 1) {
-		return luaL_error(L, "Can't join a thread that has been detached.");
+	if((this_idx1->state & TSTATE_DETACHED) == TSTATE_DETACHED) {
+		lua_pushboolean(L, 0); /* false */
+		lua_pushliteral(L, "Can't join a thread that has been detached.");
+		return 2;
 	}
-	if((this_idx1->state & TSTATE_JOINED) == 1) {
-		return luaL_error(L, "Can't join a thread that has already been joined.");
+	if((this_idx1->state & TSTATE_JOINED) == TSTATE_JOINED) {
+		lua_pushboolean(L, 0); /* false */
+		lua_pushliteral(L, "Can't join a thread that has already been joined.");
+		return 2;
 	}
 	/* join the thread. */
 	rc = llthread_join(this_idx1);
@@ -951,10 +965,12 @@ static int Lua_LLThread__join__meth(lua_State *L) {
 		return top - 1;
 	} else {
 		res_idx1 = false;
+		err_msg_idx2 = strerror(rc);
 	}
 
   lua_pushboolean(L, res_idx1);
-  return 1;
+  lua_pushstring(L, err_msg_idx2);
+  return 2;
 }
 
 /* method: new */

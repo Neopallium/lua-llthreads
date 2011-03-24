@@ -20,19 +20,34 @@
 
 local llthreads = require"llthreads"
 
+local function detached_thread(...)
+	local thread = llthreads.new([[ print("print_detached_thread:", ...) ]], ...)
+	-- start detached thread
+	assert(thread:start(true))
+	return thread
+end
+
 local function print_thread(...)
-	return llthreads.new([[ return print("print_thread:", ...) ]], ...)
+	local thread = llthreads.new([[ return print("print_thread:", ...) ]], ...)
+	-- start joinable thread
+	assert(thread:start())
+	return thread
 end
 
 local function pass_through_thread(...)
-	return llthreads.new([[ return "pass_thread:", ... ]], ...)
+	local thread = llthreads.new([[ return "pass_thread:", ... ]], ...)
+	-- start joinable thread
+	assert(thread:start())
+	return thread
 end
 
-local thread = print_thread("number:", 1234, "nil:", nil, "bool:", true)
-print(thread:start())
-print(thread:join())
+local thread1 = detached_thread("number:", 1234, "nil:", nil, "bool:", true)
 
-local thread = pass_through_thread("number:", 1234, "nil:", nil, "bool:", true)
-print(thread:start())
-print("resuls:", thread:join())
+local thread2 = print_thread("number:", 1234, "nil:", nil, "bool:", true)
+print(thread2:join())
+
+local thread3 = pass_through_thread("number:", 1234, "nil:", nil, "bool:", true)
+print("resuls:", thread3:join())
+
+os.execute("sleep 2");
 
