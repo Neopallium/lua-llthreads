@@ -345,7 +345,7 @@ static Lua_LLThread *llthread_create(lua_State *L, const char *code, size_t code
 		int top = lua_gettop(child->L);
 		/* return results to parent thread. */
 		llthread_push_results(L, child, 2, top);
-		return top - 1;
+		return top;
 	} else {
 		${res} = false;
 		${err_msg} = strerror(rc);

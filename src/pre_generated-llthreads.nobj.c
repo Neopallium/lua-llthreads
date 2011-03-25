@@ -962,7 +962,7 @@ static int Lua_LLThread__join__meth(lua_State *L) {
 		int top = lua_gettop(child->L);
 		/* return results to parent thread. */
 		llthread_push_results(L, child, 2, top);
-		return top - 1;
+		return top;
 	} else {
 		res_idx1 = false;
 		err_msg_idx2 = strerror(rc);
