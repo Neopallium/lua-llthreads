@@ -743,12 +743,15 @@ static void *run_child_thread(void *arg) {
 
 	this->status = lua_pcall(L, nargs, LUA_MULTRET, 1);
 
+	/* alwasy print errors here, helps with debugging bad code. */
+	if(this->status != 0) {
+		const char *err_msg = lua_tostring(L, -1);
+		fprintf(stderr, "Error from thread: %s\n", err_msg);
+		fflush(stderr);
+	}
+
+	/* joinable thread, do not destroy the child state, return it back to parent. */
 	if(this->is_detached == 0) {
-		if(this->status != 0) {
-			const char *err_msg = lua_tostring(L, -1);
-			fprintf(stderr, "Error from detached thread: %s\n", err_msg);
-			fflush(stderr);
-		}
 		return this;
 	}
 	/* thread is detached, so it must clean-up the child state. */
