@@ -156,7 +156,7 @@ typedef struct ffi_export_symbol {
 #define obj_type_Lua_LLThread_check(L, _index) \
 	obj_udata_luacheck(L, _index, &(obj_type_Lua_LLThread))
 #define obj_type_Lua_LLThread_delete(L, _index, flags) \
-	obj_udata_luadelete(L, _index, &(obj_type_Lua_LLThread), flags)
+	obj_udata_luadelete_weak(L, _index, &(obj_type_Lua_LLThread), flags)
 #define obj_type_Lua_LLThread_push(L, obj, flags) \
 	obj_udata_luapush_weak(L, (void *)obj, &(obj_type_Lua_LLThread), flags)
 
@@ -298,6 +298,26 @@ static FUNC_UNUSED void obj_udata_luapush(lua_State *L, void *obj, obj_type *typ
 	lua_pushlightuserdata(L, type);
 	lua_rawget(L, LUA_REGISTRYINDEX); /* type's metatable. */
 	lua_setmetatable(L, -2);
+}
+
+static FUNC_UNUSED void *obj_udata_luadelete_weak(lua_State *L, int _index, obj_type *type, int *flags) {
+	void *obj;
+	obj_udata *ud = obj_udata_luacheck_internal(L, _index, &(obj), type);
+	*flags = ud->flags;
+	/* null userdata. */
+	ud->obj = NULL;
+	ud->flags = 0;
+	/* clear the metatable to invalidate userdata. */
+	lua_pushnil(L);
+	lua_setmetatable(L, _index);
+	/* get objects weak table. */
+	lua_pushlightuserdata(L, obj_udata_weak_ref_key);
+	lua_rawget(L, LUA_REGISTRYINDEX); /* weak ref table. */
+	/* remove object from weak table. */
+	lua_pushlightuserdata(L, obj);
+	lua_pushnil(L);
+	lua_rawset(L, -3);
+	return obj;
 }
 
 static FUNC_UNUSED void obj_udata_luapush_weak(lua_State *L, void *obj, obj_type *type, int flags) {
