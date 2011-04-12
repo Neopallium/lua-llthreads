@@ -23,11 +23,15 @@ Thread to Thread communication methods
 Installation
 ============
 
+Release 1.0
+-----------
+
 lua-llthread 1.0 release:
 
 	$ sudo luarocks install lua-llthreads
 
-Or for the lastest git revision:
+Lastest Git Revision
+--------------------
 
 With LuaRocks 2.0.4.1:
 
