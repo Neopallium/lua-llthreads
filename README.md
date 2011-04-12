@@ -24,18 +24,14 @@ Installation
 ============
 
 lua-llthread 1.0 release:
-
 	$ sudo luarocks install lua-llthreads
 
-
 Or for the lastest git revision:
-* With LuaRocks 2.0.4.1:
 
+With LuaRocks 2.0.4.1:
 	$ sudo luarocks install https://github.com/Neopallium/lua-llthreads/raw/master/rockspecs/lua-llthreads-scm-0.rockspec
 
-
-* With CMake:
-
+With CMake:
 	$ git clone git://github.com/Neopallium/lua-llthreads.git
 	$ cd lua-llthreads ; mkdir build ; cd build
 	$ cmake ..
