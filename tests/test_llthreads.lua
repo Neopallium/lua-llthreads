@@ -20,6 +20,18 @@
 
 local llthreads = require"llthreads"
 
+local sleep
+local status, socket = pcall(require,"socket")
+if status then
+	sleep = function(secs)
+		return socket.sleep(secs)
+	end
+else
+	sleep = function(secs)
+		os.execute("sleep " .. tonumber(secs))
+	end
+end
+
 local function detached_thread(...)
 	local thread = llthreads.new([[ print("print_detached_thread:", ...) ]], ...)
 	-- start detached thread
@@ -43,15 +55,15 @@ end
 
 local thread1 = detached_thread("number:", 1234, "nil:", nil, "bool:", true)
 
-os.execute("sleep 1");
+sleep(1)
 
 local thread2 = print_thread("number:", 1234, "nil:", nil, "bool:", true)
 print("thread2:join: results # = ", select('#', thread2:join()))
 
-os.execute("sleep 1");
+sleep(1)
 
 local thread3 = pass_through_thread("number:", 1234, "nil:", nil, "bool:", true)
 print("thread3:join:", thread3:join())
 
-os.execute("sleep 1");
+sleep(1)
 
