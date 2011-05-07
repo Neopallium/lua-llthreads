@@ -1,7 +1,7 @@
 About
 =====
 
-A simple Lua wrapper for pthreads.
+A simple Lua wrapper for pthreads & WIN32 threads.
 
 Each thread gets it's own `lua_State` and there is no shared global state.
 The parent thread can pass data to a child thread only as parameters when creating
