@@ -18,7 +18,18 @@
 -- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 -- THE SOFTWARE.
 
-local Lua_LLThread_type = [[
+object "Lua_LLThread" {
+	c_source[[
+
+#ifdef __WINDOWS__
+#include <windows.h>
+#include <stdio.h>
+#include <process.h>
+#else
+#include <pthread.h>
+#include <stdio.h>
+#endif
+
 typedef enum {
 	TSTATE_NONE     = 0,
 	TSTATE_STARTED  = 1<<0,
@@ -34,17 +45,13 @@ typedef struct Lua_LLThread_child {
 
 typedef struct Lua_LLThread {
 	Lua_LLThread_child *child;
+#ifdef __WINDOWS__
+	HANDLE     thread;
+#else
 	pthread_t  thread;
+#endif
 	Lua_TState state;
 } Lua_LLThread;
-
-]]
-object "Lua_LLThread" {
-	sys_include "pthread.h",
-	c_source(Lua_LLThread_type),
-	c_source[[
-
-#include <stdio.h>
 
 /******************************************************************************
 * traceback() function from Lua 5.1.x source.
@@ -128,7 +135,11 @@ static void llthread_destroy(Lua_LLThread *this) {
 	free(this);
 }
 
+#ifdef __WINDOWS__
+static void run_child_thread(void *arg) {
+#else
 static void *run_child_thread(void *arg) {
+#endif
 	Lua_LLThread_child *this = (Lua_LLThread_child *)arg;
 	lua_State *L = this->L;
 	int nargs = lua_gettop(L) - 2;
@@ -142,21 +153,40 @@ static void *run_child_thread(void *arg) {
 		fflush(stderr);
 	}
 
-	/* joinable thread, do not destroy the child state, return it back to parent. */
-	if(this->is_detached == 0) {
-		return this;
+	/* if thread is detached, then destroy the child state. */
+	if(this->is_detached != 0) {
+		/* thread is detached, so it must clean-up the child state. */
+		llthread_child_destroy(this);
+		this = NULL;
 	}
-	/* thread is detached, so it must clean-up the child state. */
-	llthread_child_destroy(this);
-	return NULL;
+#ifdef __WINDOWS__
+	if(this) {
+		/* attached thread, don't close thread handle. */
+		_endthreadex(0);
+	} else {
+		/* detached thread, close thread handle. */
+		_endthread();
+	}
+#else
+	return this;
+#endif
 }
 
 static int llthread_start(Lua_LLThread *this, int start_detached) {
 	Lua_LLThread_child *child;
-	int rc;
+	int rc = 0;
 
 	child = this->child;
 	child->is_detached = start_detached;
+#ifdef __WINDOWS__
+	this->thread = (HANDLE)_beginthread(run_child_thread, 0, child);
+	if(this->thread != (HANDLE)-1L) {
+		this->state = TSTATE_STARTED;
+		if(start_detached) {
+			this->state |= TSTATE_DETACHED;
+		}
+	}
+#else
 	rc = pthread_create(&(this->thread), NULL, run_child_thread, child);
 	if(rc == 0) {
 		this->state = TSTATE_STARTED;
@@ -165,10 +195,18 @@ static int llthread_start(Lua_LLThread *this, int start_detached) {
 			rc = pthread_detach(this->thread);
 		}
 	}
+#endif
 	return rc;
 }
 
 static int llthread_join(Lua_LLThread *this) {
+#ifdef __WINDOWS__
+	WaitForSingleObject( this->thread, INFINITE );
+	/* Destroy the thread object. */
+	CloseHandle( this->thread );
+
+	return 0;
+#else
 	Lua_LLThread_child *child;
 	int rc;
 
@@ -180,6 +218,7 @@ static int llthread_join(Lua_LLThread *this) {
 		this->child = child;
 	}
 	return rc;
+#endif
 }
 
 static int llthread_move_values(lua_State *from_L, lua_State *to_L, int idx, int top, int is_arg) {

@@ -10,7 +10,6 @@
 #include "lauxlib.h"
 #include "lualib.h"
 
-#include <pthread.h>
 
 
 #define REG_PACKAGE_IS_CONSTRUCTOR 0
@@ -26,17 +25,44 @@
 #include <assert.h>
 
 #ifdef _MSC_VER
+#define __WINDOWS__
+#else
+#if defined(_WIN32)
+#define __WINDOWS__
+#endif
+#endif
+
+#ifdef __WINDOWS__
+
+/* for MinGW32 compiler need to include <stdint.h> */
+#ifdef __GNUC__
+#include <stdint.h>
+#endif
 
 /* define some standard types missing on Windows. */
+#ifndef __INT32_MAX__
 typedef __int32 int32_t;
-typedef __int64 int64_t;
 typedef unsigned __int32 uint32_t;
+#endif
+#ifndef __INT64_MAX__
+typedef __int64 int64_t;
 typedef unsigned __int64 uint64_t;
+#endif
 typedef int bool;
+#ifndef true
+#define true 1
+#endif
+#ifndef false
+#define false 1
+#endif
 
 #define FUNC_UNUSED
 
+#define LUA_NOBJ_API __declspec(dllexport)
+
 #else
+
+#define LUA_NOBJ_API LUALIB_API
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -152,19 +178,14 @@ typedef struct ffi_export_symbol {
 #endif
 
 
+
+
+static obj_type obj_types[] = {
 #define obj_type_id_Lua_LLThread 0
-#define obj_type_Lua_LLThread_check(L, _index) \
-	obj_udata_luacheck(L, _index, &(obj_type_Lua_LLThread))
-#define obj_type_Lua_LLThread_delete(L, _index, flags) \
-	obj_udata_luadelete_weak(L, _index, &(obj_type_Lua_LLThread), flags)
-#define obj_type_Lua_LLThread_push(L, obj, flags) \
-	obj_udata_luapush_weak(L, (void *)obj, &(obj_type_Lua_LLThread), flags)
-
-
-
-
-
-static obj_type obj_type_Lua_LLThread = { NULL, 0, OBJ_TYPE_FLAG_WEAK_REF, "Lua_LLThread" };
+#define obj_type_Lua_LLThread (obj_types[obj_type_id_Lua_LLThread])
+  { NULL, 0, OBJ_TYPE_FLAG_WEAK_REF, "Lua_LLThread" },
+  {NULL, -1, 0, NULL},
+};
 
 
 #ifndef REG_PACKAGE_IS_CONSTRUCTOR
@@ -431,7 +452,7 @@ static FUNC_UNUSED void * obj_simple_udata_luadelete(lua_State *L, int _index, o
 	return obj;
 }
 
-static FUNC_UNUSED void obj_simple_udata_luapush(lua_State *L, void *obj, int size, obj_type *type)
+static FUNC_UNUSED void *obj_simple_udata_luapush(lua_State *L, void *obj, int size, obj_type *type)
 {
 	/* create new userdata. */
 	void *ud = lua_newuserdata(L, size);
@@ -440,6 +461,8 @@ static FUNC_UNUSED void obj_simple_udata_luapush(lua_State *L, void *obj, int si
 	lua_pushlightuserdata(L, type);
 	lua_rawget(L, LUA_REGISTRYINDEX); /* type's metatable. */
 	lua_setmetatable(L, -2);
+
+	return ud;
 }
 
 /* default simple object equal method. */
@@ -544,6 +567,14 @@ static void obj_type_register(lua_State *L, const reg_sub_module *type_reg, int 
 		lua_pushcfunction(L, reg_list[0].func); /* push first constructor function. */
 		lua_pushcclosure(L, obj_constructor_call_wrapper, 1); /* make __call wrapper. */
 		lua_rawset(L, -3);         /* metatable.__call = <default constructor> */
+
+#if OBJ_DATA_HIDDEN_METATABLE
+		lua_pushliteral(L, "__metatable");
+		lua_pushboolean(L, 0);
+		lua_rawset(L, -3);         /* metatable.__metatable = false */
+#endif
+
+		/* setmetatable on public API table. */
 		lua_setmetatable(L, -2);
 
 		lua_pop(L, 1); /* pop public API table, don't need it any more. */
@@ -551,6 +582,11 @@ static void obj_type_register(lua_State *L, const reg_sub_module *type_reg, int 
 		lua_newtable(L);
 	} else {
 		/* register all methods as public functions. */
+#if OBJ_DATA_HIDDEN_METATABLE
+		lua_pop(L, 1); /* pop public API table, don't need it any more. */
+		/* create methods table. */
+		lua_newtable(L);
+#endif
 	}
 
 	luaL_register(L, NULL, type_reg->methods); /* fill methods table. */
@@ -571,6 +607,8 @@ static void obj_type_register(lua_State *L, const reg_sub_module *type_reg, int 
 	lua_pushstring(L, type->name);
 	lua_pushvalue(L, -2); /* dup metatable. */
 	lua_rawset(L, priv_table);    /* priv_table["<object_name>"] = metatable */
+#else
+	(void)priv_table;
 #endif
 
 	luaL_register(L, NULL, type_reg->metas); /* fill metatable */
@@ -589,9 +627,9 @@ static void obj_type_register(lua_State *L, const reg_sub_module *type_reg, int 
 	lua_rawset(L, -3);                  /* metatable.__index = methods */
 #if OBJ_DATA_HIDDEN_METATABLE
 	lua_pushliteral(L, "__metatable");
-	lua_pushvalue(L, -3);               /* dup methods table */
+	lua_pushboolean(L, 0);
 	lua_rawset(L, -3);                  /* hide metatable:
-	                                       metatable.__metatable = methods */
+	                                       metatable.__metatable = false */
 #endif
 	lua_pop(L, 2);                      /* drop metatable & methods */
 }
@@ -649,7 +687,26 @@ static int nobj_try_loading_ffi(lua_State *L, const char *ffi_mod_name,
 #endif
 
 
+#define obj_type_Lua_LLThread_check(L, _index) \
+	obj_udata_luacheck(L, _index, &(obj_type_Lua_LLThread))
+#define obj_type_Lua_LLThread_delete(L, _index, flags) \
+	obj_udata_luadelete_weak(L, _index, &(obj_type_Lua_LLThread), flags)
+#define obj_type_Lua_LLThread_push(L, obj, flags) \
+	obj_udata_luapush_weak(L, (void *)obj, &(obj_type_Lua_LLThread), flags)
 
+
+
+
+
+
+#ifdef __WINDOWS__
+#include <windows.h>
+#include <stdio.h>
+#include <process.h>
+#else
+#include <pthread.h>
+#include <stdio.h>
+#endif
 
 typedef enum {
 	TSTATE_NONE     = 0,
@@ -666,13 +723,13 @@ typedef struct Lua_LLThread_child {
 
 typedef struct Lua_LLThread {
 	Lua_LLThread_child *child;
+#ifdef __WINDOWS__
+	HANDLE     thread;
+#else
 	pthread_t  thread;
+#endif
 	Lua_TState state;
 } Lua_LLThread;
-
-
-
-#include <stdio.h>
 
 /******************************************************************************
 * traceback() function from Lua 5.1.x source.
@@ -756,7 +813,11 @@ static void llthread_destroy(Lua_LLThread *this) {
 	free(this);
 }
 
+#ifdef __WINDOWS__
+static void run_child_thread(void *arg) {
+#else
 static void *run_child_thread(void *arg) {
+#endif
 	Lua_LLThread_child *this = (Lua_LLThread_child *)arg;
 	lua_State *L = this->L;
 	int nargs = lua_gettop(L) - 2;
@@ -770,21 +831,40 @@ static void *run_child_thread(void *arg) {
 		fflush(stderr);
 	}
 
-	/* joinable thread, do not destroy the child state, return it back to parent. */
-	if(this->is_detached == 0) {
-		return this;
+	/* if thread is detached, then destroy the child state. */
+	if(this->is_detached != 0) {
+		/* thread is detached, so it must clean-up the child state. */
+		llthread_child_destroy(this);
+		this = NULL;
 	}
-	/* thread is detached, so it must clean-up the child state. */
-	llthread_child_destroy(this);
-	return NULL;
+#ifdef __WINDOWS__
+	if(this) {
+		/* attached thread, don't close thread handle. */
+		_endthreadex(0);
+	} else {
+		/* detached thread, close thread handle. */
+		_endthread();
+	}
+#else
+	return this;
+#endif
 }
 
 static int llthread_start(Lua_LLThread *this, int start_detached) {
 	Lua_LLThread_child *child;
-	int rc;
+	int rc = 0;
 
 	child = this->child;
 	child->is_detached = start_detached;
+#ifdef __WINDOWS__
+	this->thread = (HANDLE)_beginthread(run_child_thread, 0, child);
+	if(this->thread != (HANDLE)-1L) {
+		this->state = TSTATE_STARTED;
+		if(start_detached) {
+			this->state |= TSTATE_DETACHED;
+		}
+	}
+#else
 	rc = pthread_create(&(this->thread), NULL, run_child_thread, child);
 	if(rc == 0) {
 		this->state = TSTATE_STARTED;
@@ -793,10 +873,18 @@ static int llthread_start(Lua_LLThread *this, int start_detached) {
 			rc = pthread_detach(this->thread);
 		}
 	}
+#endif
 	return rc;
 }
 
 static int llthread_join(Lua_LLThread *this) {
+#ifdef __WINDOWS__
+	WaitForSingleObject( this->thread, INFINITE );
+	/* Destroy the thread object. */
+	CloseHandle( this->thread );
+
+	return 0;
+#else
 	Lua_LLThread_child *child;
 	int rc;
 
@@ -808,6 +896,7 @@ static int llthread_join(Lua_LLThread *this) {
 		this->child = child;
 	}
 	return rc;
+#endif
 }
 
 static int llthread_move_values(lua_State *from_L, lua_State *to_L, int idx, int top, int is_arg) {
@@ -1086,7 +1175,7 @@ static void create_object_instance_cache(lua_State *L) {
 	lua_rawset(L, LUA_REGISTRYINDEX);  /* create reference to weak table. */
 }
 
-LUALIB_API int luaopen_llthreads(lua_State *L) {
+LUA_NOBJ_API int luaopen_llthreads(lua_State *L) {
 	const reg_sub_module *reg = reg_sub_modules;
 	const luaL_Reg *submodules = submodule_libs;
 	int priv_table = -1;
