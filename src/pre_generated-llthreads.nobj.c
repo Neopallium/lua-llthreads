@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 
 #ifdef _MSC_VER
 #define __WINDOWS__
@@ -37,6 +38,20 @@
 /* for MinGW32 compiler need to include <stdint.h> */
 #ifdef __GNUC__
 #include <stdint.h>
+#endif
+
+/* wrap strerror_s(). */
+#ifdef __GNUC__
+#ifndef strerror_r
+#define strerror_r(errno, buf, buflen) do { \
+	strncpy((buf), strerror(errno), (buflen)-1); \
+	(buf)[(buflen)-1] = '\0'; \
+} while(0)
+#endif
+#else
+#ifndef strerror_r
+#define strerror_r(errno, buf, buflen) strerror_s((buf), (buflen), (errno))
+#endif
 #endif
 
 /* define some standard types missing on Windows. */
@@ -731,6 +746,8 @@ typedef struct Lua_LLThread {
 	Lua_TState state;
 } Lua_LLThread;
 
+#define ERROR_LEN 1024
+
 /******************************************************************************
 * traceback() function from Lua 5.1.x source.
 * Copyright (C) 1994-2008 Lua.org, PUC-Rio.  All rights reserved.
@@ -1016,6 +1033,7 @@ static int Lua_LLThread__start__meth(lua_State *L) {
   Lua_LLThread * this_idx1 = obj_type_Lua_LLThread_check(L,1);
   bool start_detached_idx2 = lua_toboolean(L,2);
   bool res_idx1 = 0;
+	char buf[ERROR_LEN];
 	int rc;
 
 	if(this_idx1->state != TSTATE_NONE) {
@@ -1025,7 +1043,8 @@ static int Lua_LLThread__start__meth(lua_State *L) {
 	}
 	if((rc = llthread_start(this_idx1, start_detached_idx2)) != 0) {
 		lua_pushboolean(L, 0); /* false */
-		lua_pushstring(L, strerror(rc));
+		strerror_r(errno, buf, ERROR_LEN);
+		lua_pushstring(L, buf);
 		return 2;
 	}
 	res_idx1 = true;
@@ -1040,6 +1059,8 @@ static int Lua_LLThread__join__meth(lua_State *L) {
   bool res_idx1 = 0;
   const char * err_msg_idx2 = NULL;
 	Lua_LLThread_child *child;
+	char buf[ERROR_LEN];
+	int top;
 	int rc;
 
 	if((this_idx1->state & TSTATE_STARTED) == 0) {
@@ -1071,13 +1092,14 @@ static int Lua_LLThread__join__meth(lua_State *L) {
 		} else {
 			lua_pushboolean(L, 1);
 		}
-		int top = lua_gettop(child->L);
+		top = lua_gettop(child->L);
 		/* return results to parent thread. */
 		llthread_push_results(L, child, 2, top);
 		return top;
 	} else {
 		res_idx1 = false;
-		err_msg_idx2 = strerror(rc);
+		err_msg_idx2 = buf;
+		strerror_r(errno, buf, ERROR_LEN);
 	}
 
   lua_pushboolean(L, res_idx1);

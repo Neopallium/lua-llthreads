@@ -53,6 +53,8 @@ typedef struct Lua_LLThread {
 	Lua_TState state;
 } Lua_LLThread;
 
+#define ERROR_LEN 1024
+
 /******************************************************************************
 * traceback() function from Lua 5.1.x source.
 * Copyright (C) 1994-2008 Lua.org, PUC-Rio.  All rights reserved.
@@ -331,6 +333,7 @@ static Lua_LLThread *llthread_create(lua_State *L, const char *code, size_t code
 		var_in{ "bool", "start_detached", is_optional = true },
 		var_out{ "bool", "res" },
 		c_source "pre" [[
+	char buf[ERROR_LEN];
 	int rc;
 ]],
 		c_source[[
@@ -341,7 +344,8 @@ static Lua_LLThread *llthread_create(lua_State *L, const char *code, size_t code
 	}
 	if((rc = llthread_start(${this}, ${start_detached})) != 0) {
 		lua_pushboolean(L, 0); /* false */
-		lua_pushstring(L, strerror(rc));
+		strerror_r(errno, buf, ERROR_LEN);
+		lua_pushstring(L, buf);
 		return 2;
 	}
 	${res} = true;
@@ -352,6 +356,8 @@ static Lua_LLThread *llthread_create(lua_State *L, const char *code, size_t code
 		var_out{ "const char *", "err_msg" },
 		c_source "pre" [[
 	Lua_LLThread_child *child;
+	char buf[ERROR_LEN];
+	int top;
 	int rc;
 ]],
 		c_source[[
@@ -384,13 +390,14 @@ static Lua_LLThread *llthread_create(lua_State *L, const char *code, size_t code
 		} else {
 			lua_pushboolean(L, 1);
 		}
-		int top = lua_gettop(child->L);
+		top = lua_gettop(child->L);
 		/* return results to parent thread. */
 		llthread_push_results(L, child, 2, top);
 		return top;
 	} else {
 		${res} = false;
-		${err_msg} = strerror(rc);
+		${err_msg} = buf;
+		strerror_r(errno, buf, ERROR_LEN);
 	}
 ]]
 	},
