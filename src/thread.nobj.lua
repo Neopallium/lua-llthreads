@@ -228,6 +228,7 @@ static int llthread_move_values(lua_State *from_L, lua_State *to_L, int idx, int
 	size_t str_len;
 	int nvalues = 0;
 	int n;
+	int key, value;
 
 	for(n = idx; n <= top; n++) {
 		/* only support string/number/boolean/nil/lightuserdata. */
@@ -249,12 +250,26 @@ static int llthread_move_values(lua_State *from_L, lua_State *to_L, int idx, int
 			lua_pushlightuserdata(to_L, lua_touserdata(from_L, n));
 			break;
 		case LUA_TTABLE:
+			lua_newtable(to_L);
+			lua_pushnil(from_L);
+			while (lua_next(from_L, n) != 0) {
+				/* key is at -2, value at -1, but we need to normalize these
+				 * to positive indices */
+				key = lua_gettop(from_L) - 1;
+				value = lua_gettop(from_L);
+				llthread_move_values(from_L, to_L, key, value, is_arg);
+				/* Copied key and value are now at -2 and -1 in to_L. */
+				lua_settable(to_L, -3);
+				/* Pop value for next iteration */
+				lua_pop(from_L, 1);
+			}
+			break;
 		case LUA_TFUNCTION:
 		case LUA_TUSERDATA:
 		case LUA_TTHREAD:
 		default:
 			if (is_arg) {
-				return luaL_argerror(from_L, n, "table/function/userdata/thread types un-supported.");
+				return luaL_argerror(from_L, n, "function/userdata/thread types un-supported.");
 			} else {
 				/* convert un-supported types to an error string. */
 				lua_pushfstring(to_L, "Un-supported value: %s: %p",
