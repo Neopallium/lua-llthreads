@@ -21,6 +21,9 @@
 object "Lua_LLThread" {
 	c_source[[
 
+/* maximum recursive depth of table copies. */
+#define MAX_COPY_DEPTH 30
+
 #ifdef __WINDOWS__
 #include <windows.h>
 #include <stdio.h>
@@ -223,71 +226,153 @@ static int llthread_join(Lua_LLThread *this) {
 #endif
 }
 
-static int llthread_move_values(lua_State *from_L, lua_State *to_L, int idx, int top, int is_arg) {
+typedef struct {
+	lua_State *from_L;
+	lua_State *to_L;
+	int has_cache;
+	int cache_idx;
+	int is_arg;
+} llthread_copy_state;
+
+static int llthread_copy_table_from_cache(llthread_copy_state *state, int idx) {
+	void *ptr;
+
+	/* convert table to pointer for lookup in cache. */
+	ptr = (void *)lua_topointer(state->from_L, idx);
+	if(ptr == NULL) return 0; /* can't convert to pointer. */
+
+	/* check if we need to create the cache. */
+	if(!state->has_cache) {
+		lua_newtable(state->to_L);
+		lua_replace(state->to_L, state->cache_idx);
+		state->has_cache = 1;
+	}
+
+	lua_pushlightuserdata(state->to_L, ptr);
+	lua_rawget(state->to_L, state->cache_idx);
+	if(lua_isnil(state->to_L, -1)) {
+		/* not in cache. */
+		lua_pop(state->to_L, 1);
+		/* create new table and add to cache. */
+		lua_newtable(state->to_L);
+		lua_pushlightuserdata(state->to_L, ptr);
+		lua_pushvalue(state->to_L, -2);
+		lua_rawset(state->to_L, state->cache_idx);
+		return 0;
+	}
+	/* found table in cache. */
+	return 1;
+}
+
+static int llthread_copy_value(llthread_copy_state *state, int depth, int idx) {
 	const char *str;
 	size_t str_len;
+	int kv_pos;
+
+	/* Maximum recursive depth */
+	if(++depth > MAX_COPY_DEPTH) {
+		return luaL_error(state->from_L, "Hit maximum copy depth (%d > %d).", depth, MAX_COPY_DEPTH);
+	}
+
+	/* only support string/number/boolean/nil/table/lightuserdata. */
+	switch(lua_type(state->from_L, idx)) {
+	case LUA_TNIL:
+		lua_pushnil(state->to_L);
+		break;
+	case LUA_TNUMBER:
+		lua_pushnumber(state->to_L, lua_tonumber(state->from_L, idx));
+		break;
+	case LUA_TBOOLEAN:
+		lua_pushboolean(state->to_L, lua_toboolean(state->from_L, idx));
+		break;
+	case LUA_TSTRING:
+		str = lua_tolstring(state->from_L, idx, &(str_len));
+		lua_pushlstring(state->to_L, str, str_len);
+		break;
+	case LUA_TLIGHTUSERDATA:
+		lua_pushlightuserdata(state->to_L, lua_touserdata(state->from_L, idx));
+		break;
+	case LUA_TTABLE:
+		/* make sure there is room on the new state for 3 values (table,key,value) */
+		if(!lua_checkstack(state->to_L, 3)) {
+			return luaL_error(state->from_L, "To stack overflow!");
+		}
+		/* make room on from stack for key/value pairs. */
+		luaL_checkstack(state->from_L, 2, "From stack overflow!");
+
+		/* check cache for table. */
+		if(llthread_copy_table_from_cache(state, idx)) {
+			/* found in cache don't need to copy table. */
+			break;
+		}
+		lua_pushnil(state->from_L);
+		while (lua_next(state->from_L, idx) != 0) {
+			/* key is at (top - 1), value at (top), but we need to normalize these
+			 * to positive indices */
+			kv_pos = lua_gettop(state->from_L);
+			/* copy key */
+			llthread_copy_value(state, depth, kv_pos - 1);
+			/* copy value */
+			llthread_copy_value(state, depth, kv_pos);
+			/* Copied key and value are now at -2 and -1 in state->to_L. */
+			lua_settable(state->to_L, -3);
+			/* Pop value for next iteration */
+			lua_pop(state->from_L, 1);
+		}
+		break;
+	case LUA_TFUNCTION:
+	case LUA_TUSERDATA:
+	case LUA_TTHREAD:
+	default:
+		if (state->is_arg) {
+			return luaL_argerror(state->from_L, idx, "function/userdata/thread types un-supported.");
+		} else {
+			/* convert un-supported types to an error string. */
+			lua_pushfstring(state->to_L, "Un-supported value: %s: %p",
+				lua_typename(state->from_L, lua_type(state->from_L, idx)), lua_topointer(state->from_L, idx));
+		}
+	}
+
+	return 1;
+}
+
+static int llthread_copy_values(lua_State *from_L, lua_State *to_L, int idx, int top, int is_arg) {
+	llthread_copy_state state;
 	int nvalues = 0;
 	int n;
-	int key, value;
 
+	nvalues = (top - idx) + 1;
+	/* make sure there is room on the new state for the values. */
+	if(!lua_checkstack(to_L, nvalues + 1)) {
+		return luaL_error(from_L, "To stack overflow!");
+	}
+
+	/* setup copy state. */
+	state.from_L = from_L;
+	state.to_L = to_L;
+	state.is_arg = is_arg;
+	state.has_cache = 0; /* don't create cache table unless it is needed. */
+	lua_pushnil(to_L);
+	state.cache_idx = lua_gettop(to_L);
+
+	nvalues = 0;
 	for(n = idx; n <= top; n++) {
-		/* only support string/number/boolean/nil/lightuserdata. */
-		switch(lua_type(from_L, n)) {
-		case LUA_TNIL:
-			lua_pushnil(to_L);
-			break;
-		case LUA_TNUMBER:
-			lua_pushnumber(to_L, lua_tonumber(from_L, n));
-			break;
-		case LUA_TBOOLEAN:
-			lua_pushboolean(to_L, lua_toboolean(from_L, n));
-			break;
-		case LUA_TSTRING:
-			str = lua_tolstring(from_L, n, &(str_len));
-			lua_pushlstring(to_L, str, str_len);
-			break;
-		case LUA_TLIGHTUSERDATA:
-			lua_pushlightuserdata(to_L, lua_touserdata(from_L, n));
-			break;
-		case LUA_TTABLE:
-			lua_newtable(to_L);
-			lua_pushnil(from_L);
-			while (lua_next(from_L, n) != 0) {
-				/* key is at -2, value at -1, but we need to normalize these
-				 * to positive indices */
-				key = lua_gettop(from_L) - 1;
-				value = lua_gettop(from_L);
-				llthread_move_values(from_L, to_L, key, value, is_arg);
-				/* Copied key and value are now at -2 and -1 in to_L. */
-				lua_settable(to_L, -3);
-				/* Pop value for next iteration */
-				lua_pop(from_L, 1);
-			}
-			break;
-		case LUA_TFUNCTION:
-		case LUA_TUSERDATA:
-		case LUA_TTHREAD:
-		default:
-			if (is_arg) {
-				return luaL_argerror(from_L, n, "function/userdata/thread types un-supported.");
-			} else {
-				/* convert un-supported types to an error string. */
-				lua_pushfstring(to_L, "Un-supported value: %s: %p",
-					lua_typename(from_L, lua_type(from_L, n)), lua_topointer(from_L, n));
-			}
-		}
+		llthread_copy_value(&state, 0, n);
 		++nvalues;
 	}
+
+	/* remove cache table. */
+	lua_remove(to_L, state.cache_idx);
 
 	return nvalues;
 }
 
 static int llthread_push_args(lua_State *L, Lua_LLThread_child *child, int idx, int top) {
-	return llthread_move_values(L, child->L, idx, top, 1 /* is_arg */);
+	return llthread_copy_values(L, child->L, idx, top, 1 /* is_arg */);
 }
 
 static int llthread_push_results(lua_State *L, Lua_LLThread_child *child, int idx, int top) {
-	return llthread_move_values(child->L, L, idx, top, 0 /* is_arg */);
+	return llthread_copy_values(child->L, L, idx, top, 0 /* is_arg */);
 }
 
 static Lua_LLThread *llthread_create(lua_State *L, const char *code, size_t code_len) {
