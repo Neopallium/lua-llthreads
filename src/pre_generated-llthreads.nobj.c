@@ -56,7 +56,7 @@ typedef int bool;
 #define true 1
 #endif
 #ifndef false
-#define false 1
+#define false 0
 #endif
 
 #endif
@@ -250,7 +250,8 @@ static int nobj_check_ffi_support(lua_State *L) {
 	if(!lua_isnil(L, -1)) {
 		rc = lua_toboolean(L, -1);
 		lua_pop(L, 1);
-		return rc; /* return results of previous check. */
+		/* use results of previous check. */
+		goto finished;
 	}
 	lua_pop(L, 1); /* pop nil. */
 
@@ -276,6 +277,7 @@ static int nobj_check_ffi_support(lua_State *L) {
 	lua_pushboolean(L, rc);
 	lua_rawset(L, LUA_REGISTRYINDEX);
 
+finished:
 	/* turn-on hint that there is FFI code enabled. */
 	if(rc) {
 		nobj_ffi_support_enabled_hint = 1;
@@ -284,9 +286,29 @@ static int nobj_check_ffi_support(lua_State *L) {
 	return rc;
 }
 
+typedef struct {
+	const char **ffi_init_code;
+	int offset;
+} nobj_reader_state;
+
+static const char *nobj_lua_Reader(lua_State *L, void *data, size_t *size) {
+	nobj_reader_state *state = (nobj_reader_state *)data;
+	const char *ptr;
+
+	ptr = state->ffi_init_code[state->offset];
+	if(ptr != NULL) {
+		*size = strlen(ptr);
+		state->offset++;
+	} else {
+		*size = 0;
+	}
+	return ptr;
+}
+
 static int nobj_try_loading_ffi(lua_State *L, const char *ffi_mod_name,
-		const char *ffi_init_code, const ffi_export_symbol *ffi_exports, int priv_table)
+		const char *ffi_init_code[], const ffi_export_symbol *ffi_exports, int priv_table)
 {
+	nobj_reader_state state = { ffi_init_code, 0 };
 	int err;
 
 	/* export symbols to priv_table. */
@@ -296,7 +318,7 @@ static int nobj_try_loading_ffi(lua_State *L, const char *ffi_mod_name,
 		lua_settable(L, priv_table);
 		ffi_exports++;
 	}
-	err = luaL_loadbuffer(L, ffi_init_code, strlen(ffi_init_code), ffi_mod_name);
+	err = lua_load(L, nobj_lua_Reader, &state, ffi_mod_name);
 	if(0 == err) {
 		lua_pushvalue(L, -2); /* dup C module's table. */
 		lua_pushvalue(L, priv_table); /* move priv_table to top of stack. */
@@ -670,6 +692,7 @@ static FUNC_UNUSED void * obj_simple_udata_luadelete(lua_State *L, int _index, o
 
 static FUNC_UNUSED void *obj_simple_udata_luapush(lua_State *L, void *obj, int size, obj_type *type)
 {
+	void *ud;
 #if LUAJIT_FFI
 	lua_pushlightuserdata(L, type);
 	lua_rawget(L, LUA_REGISTRYINDEX); /* type's metatable. */
@@ -681,7 +704,7 @@ static FUNC_UNUSED void *obj_simple_udata_luapush(lua_State *L, void *obj, int s
 	}
 #endif
 	/* create new userdata. */
-	void *ud = lua_newuserdata(L, size);
+	ud = lua_newuserdata(L, size);
 	memcpy(ud, obj, size);
 	/* get obj_type metatable. */
 #if LUAJIT_FFI
@@ -1483,7 +1506,7 @@ static const reg_sub_module reg_sub_modules[] = {
 
 #if LUAJIT_FFI
 static const ffi_export_symbol llthreads_ffi_export[] = {
-  {NULL, { .data = NULL } }
+  {NULL, { NULL } }
 };
 #endif
 
