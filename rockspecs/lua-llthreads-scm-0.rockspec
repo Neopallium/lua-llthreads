@@ -13,10 +13,18 @@ dependencies = {
 }
 build = {
 	type = "builtin",
+	platforms = {
+		unix = {
+			modules = {
+				llthreads = {
+					libraries = {"pthread"},
+				}
+			}
+		}
+	},
 	modules = {
 		llthreads = {
 			sources = {"src/pre_generated-llthreads.nobj.c"},
-			libraries = {"pthread"},
 		}
 	}
 }
