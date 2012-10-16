@@ -59,7 +59,7 @@ typedef struct Lua_LLThread {
 #define ERROR_LEN 1024
 
 /******************************************************************************
-* traceback() function from Lua 5.1.x source.
+* traceback() function from Lua 5.1/5.2 source.
 * Copyright (C) 1994-2008 Lua.org, PUC-Rio.  All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining
@@ -81,10 +81,12 @@ typedef struct Lua_LLThread {
 * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ******************************************************************************/
+#if !defined(LUA_VERSION_NUM) || (LUA_VERSION_NUM == 501)
+/* from Lua 5.1 */
 static int traceback (lua_State *L) {
   if (!lua_isstring(L, 1))  /* 'message' not a string? */
     return 1;  /* keep it intact */
-  lua_getfield(L, LUA_GLOBALSINDEX, "debug");
+  lua_getglobal(L, "debug");
   if (!lua_istable(L, -1)) {
     lua_pop(L, 1);
     return 1;
@@ -99,6 +101,19 @@ static int traceback (lua_State *L) {
   lua_call(L, 2, 1);  /* call debug.traceback */
   return 1;
 }
+#else
+/* from Lua 5.2 */
+static int traceback (lua_State *L) {
+  const char *msg = lua_tostring(L, 1);
+  if (msg)
+    luaL_traceback(L, L, msg, 1);
+  else if (!lua_isnoneornil(L, 1)) {  /* is there an error object? */
+    if (!luaL_callmeta(L, 1, "__tostring"))  /* try its 'tostring' metamethod */
+      lua_pushliteral(L, "(no error message)");
+  }
+  return 1;
+}
+#endif
 
 static Lua_LLThread_child *llthread_child_new() {
 	Lua_LLThread_child *this;
