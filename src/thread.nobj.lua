@@ -129,13 +129,19 @@ static Lua_LLThread *llthread_new() {
 	return this;
 }
 
+static void llthread_cleanup_child(Lua_LLThread *this) {
+	if(this->child) {
+		llthread_child_destroy(this->child);
+		this->child = NULL;
+	}
+}
+
 static void llthread_destroy(Lua_LLThread *this) {
 	/* We still own the child thread object iff the thread was not started or
 	 * we have joined the thread.
 	 */
 	if((this->state & TSTATE_JOINED) == TSTATE_JOINED || this->state == TSTATE_NONE) {
-		if(this->child) llthread_child_destroy(this->child);
-		this->child = NULL;
+		llthread_cleanup_child(this);
 	}
 	free(this);
 }
@@ -189,6 +195,7 @@ static int llthread_start(Lua_LLThread *this, int start_detached) {
 		this->state = TSTATE_STARTED;
 		if(start_detached) {
 			this->state |= TSTATE_DETACHED;
+			this->child = NULL;
 		}
 	}
 #else
@@ -197,6 +204,7 @@ static int llthread_start(Lua_LLThread *this, int start_detached) {
 		this->state = TSTATE_STARTED;
 		if(start_detached) {
 			this->state |= TSTATE_DETACHED;
+			this->child = NULL;
 			rc = pthread_detach(this->thread);
 		}
 	}
@@ -210,17 +218,16 @@ static int llthread_join(Lua_LLThread *this) {
 	/* Destroy the thread object. */
 	CloseHandle( this->thread );
 
+	this->state |= TSTATE_JOINED;
+
 	return 0;
 #else
-	Lua_LLThread_child *child;
 	int rc;
 
 	/* then join the thread. */
-	rc = pthread_join(this->thread, (void **)&(child));
+	rc = pthread_join(this->thread, NULL);
 	if(rc == 0) {
 		this->state |= TSTATE_JOINED;
-		/* if the child thread returns NULL, then it freed the child object. */
-		this->child = child;
 	}
 	return rc;
 #endif
@@ -486,19 +493,21 @@ static Lua_LLThread *llthread_create(lua_State *L, const char *code, size_t code
 			const char *err_msg = lua_tostring(child->L, -1);
 			lua_pushboolean(L, 0);
 			lua_pushfstring(L, "Error from child thread: %s", err_msg);
-			return 2;
+			top = 2;
 		} else {
 			lua_pushboolean(L, 1);
+			top = lua_gettop(child->L);
+			/* return results to parent thread. */
+			llthread_push_results(L, child, 2, top);
 		}
-		top = lua_gettop(child->L);
-		/* return results to parent thread. */
-		llthread_push_results(L, child, 2, top);
+		llthread_cleanup_child(${this});
 		return top;
 	} else {
 		${res} = false;
 		${err_msg} = buf;
 		strerror_r(errno, buf, ERROR_LEN);
 	}
+	llthread_cleanup_child(${this});
 ]]
 	},
 }
