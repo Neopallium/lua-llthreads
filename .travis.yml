@@ -1,0 +1,59 @@
+﻿language: c
+
+env:
+  matrix:
+    - LUA=lua5.1 LIBLUA=liblua5.1-dev     LUA_INCDIR=/usr/include/lua5.1     LUA_LIB=lua5.1
+    - LUA=lua5.2 LIBLUA=liblua5.2-dev     LUA_INCDIR=/usr/include/lua5.2     LUA_LIB=lua5.2
+    - LUA=luajit LIBLUA=libluajit-5.1-dev LUA_INCDIR=/usr/include/luajit-2.0 LUA_LIB=luajit-5.1
+
+branches:
+  only:
+    - master
+
+compiler:
+  - gcc
+
+before_install:
+  - if [ $LUA = "luajit" ]; then
+      sudo add-apt-repository ppa:mwild1/ppa -y && sudo apt-get update -y;
+    fi
+
+install:
+  - sudo apt-get install $LUA -y
+  - sudo apt-get install $LIBLUA -y
+  - LUA_LIBDIR=`pkg-config $LUA --variable=libdir`
+  - INSTALL_LMOD=`pkg-config $LUA --variable=INSTALL_LMOD`
+  - INSTALL_CMOD=`pkg-config $LUA --variable=INSTALL_CMOD`
+  ## make sure there is a 'lua' command.
+  - if [ ! -x /usr/bin/lua ]; then
+      sudo ln -s `which $LUA` /usr/bin/lua;
+    fi
+
+script:
+  #### build using pre-generated bindings.
+  - mkdir build; cd build
+  - cmake .. -DLUA_LIBRARIES=$LUA_LIBDIR -DLUA_INCLUDE_DIR=$LUA_INCDIR
+      -DINSTALL_LMOD=$INSTALL_LMOD -DINSTALL_CMOD=$INSTALL_CMOD
+  - make
+  - sudo make install
+  # Run tests.
+  - $LUA ../tests/test_join_gc.lua
+  - $LUA ../tests/test_llthreads.lua
+  - cd .. ; rm -rf build
+  #### Re-Generate bindings.
+  - git clone git://github.com/Neopallium/LuaNativeObjects.git;
+  - mkdir build; cd build
+  - cmake .. -DLUA_LIBRARIES=$LUA_LIBDIR -DLUA_INCLUDE_DIR=$LUA_INCDIR
+      -DLUA_NATIVE_OBJECTS_PATH=$TRAVIS_BUILD_DIR/LuaNativeObjects
+      -DUSE_PRE_GENERATED_BINDINGS=OFF -DGENERATE_LUADOCS=OFF
+      -DINSTALL_LMOD=$INSTALL_LMOD -DINSTALL_CMOD=$INSTALL_CMOD
+  - make
+  - sudo make install
+  # Run tests.
+  - $LUA ../tests/test_join_gc.lua
+  - $LUA ../tests/test_llthreads.lua
+
+notifications:
+  email:
+    on_failure: always
+    on_success: change

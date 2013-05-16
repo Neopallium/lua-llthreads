@@ -1,6 +1,8 @@
 About
 =====
 
+[![travis-ci status](https://secure.travis-ci.org/Neopallium/lua-llthreads.png?branch=master)](http://travis-ci.org/Neopallium/lua-llthreads/builds)
+
 A simple Lua wrapper for pthreads & WIN32 threads.
 
 Each thread gets it's own `lua_State` and there is no shared global state.
