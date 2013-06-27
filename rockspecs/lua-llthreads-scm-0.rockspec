@@ -20,6 +20,13 @@ build = {
 					libraries = {"pthread"},
 				}
 			}
+		},
+		windows = {
+			modules = {
+				llthreads = {
+					libraries = {"kernel32"},
+				}
+			}
 		}
 	},
 	modules = {
