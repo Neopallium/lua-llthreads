@@ -1,7 +1,7 @@
 #
 # A simple low-level Lua wrapper for pthreads.
 #
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.18)
 
 project(lua-llthreads C)
 
@@ -9,18 +9,18 @@ set(BUILD_SHARED_LIBS TRUE)
 
 set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 
-set(INSTALL_CMOD ${CMAKE_INSTALL_PREFIX}/lib/lua/5.1 CACHE PATH
-				"Directory to install Lua binary modules (configure lua via LUA_CPATH)")
+set(INSTALL_CMOD share/lua/cmod CACHE PATH "Directory to install Lua binary modules (configure lua via LUA_CPATH)")
 
 set(COMMON_CFLAGS "${CFLAGS}")
 set(COMMON_LDFLAGS)
 set(COMMON_LIBS)
 
-## Lua 5.1.x
-include(FindLua51)
-if(NOT ${LUA51_FOUND})
-    message(FATAL_ERROR "The FindLua51 module could not find lua :-(")
+## Lua 5.x
+include(FindLua)
+if(NOT ${LUA_FOUND})
+    message(FATAL_ERROR "The FindLua module could not find lua :-(")
 endif()
+set(COMMON_LIBS "${COMMON_LIBS};${LUA_LIBRARIES}")
 if(WIN32)
 	set(COMMON_CFLAGS "${COMMON_CFLAGS} -I${LUA_INCLUDE_DIR}")
 	set(COMMON_LDFLAGS "${COMMON_LDFLAGS} ${LUA_LIBRARY}")

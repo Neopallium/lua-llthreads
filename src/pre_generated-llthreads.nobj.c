@@ -20,12 +20,10 @@
 #define luaL_Reg luaL_reg
 #endif
 
-/* some Lua 5.1 compatibility support. */
-#if !defined(LUA_VERSION_NUM) || (LUA_VERSION_NUM == 501)
 /*
-** Adapted from Lua 5.2.0
+** Adapted from Lua 5.2.0 luaL_setfuncs.
 */
-static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
+static void nobj_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
   luaL_checkstack(L, nup, "too many upvalues");
   for (; l->name != NULL; l++) {  /* fill the table with given functions */
     int i;
@@ -38,6 +36,9 @@ static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
   lua_pop(L, nup);  /* remove upvalues */
 }
 
+/* some Lua 5.1 compatibility support. */
+#if !defined(LUA_VERSION_NUM) || (LUA_VERSION_NUM == 501)
+
 #define lua_load_no_mode(L, reader, data, source) \
 	lua_load(L, reader, data, source)
 
@@ -45,7 +46,7 @@ static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
 
 #endif
 
-#if LUA_VERSION_NUM == 502
+#if LUA_VERSION_NUM >= 502
 
 #define lua_load_no_mode(L, reader, data, source) \
 	lua_load(L, reader, data, source, NULL)
@@ -1147,7 +1148,7 @@ static void obj_type_register_package(lua_State *L, const reg_sub_module *type_r
 	/* create public functions table. */
 	if(reg_list != NULL && reg_list[0].name != NULL) {
 		/* register functions */
-		luaL_setfuncs(L, reg_list, 0);
+		nobj_setfuncs(L, reg_list, 0);
 	}
 
 	obj_type_register_constants(L, type_reg->constants, -1, type_reg->bidirectional_consts);
@@ -1162,17 +1163,17 @@ static void obj_type_register_meta(lua_State *L, const reg_sub_module *type_reg)
 	reg_list = type_reg->pub_funcs;
 	if(reg_list != NULL && reg_list[0].name != NULL) {
 		/* register functions */
-		luaL_setfuncs(L, reg_list, 0);
+		nobj_setfuncs(L, reg_list, 0);
 	}
 
 	obj_type_register_constants(L, type_reg->constants, -1, type_reg->bidirectional_consts);
 
 	/* register methods. */
-	luaL_setfuncs(L, type_reg->methods, 0);
+	nobj_setfuncs(L, type_reg->methods, 0);
 
 	/* create metatable table. */
 	lua_newtable(L);
-	luaL_setfuncs(L, type_reg->metas, 0); /* fill metatable */
+	nobj_setfuncs(L, type_reg->metas, 0); /* fill metatable */
 	/* setmetatable on meta-object. */
 	lua_setmetatable(L, -2);
 
@@ -1197,7 +1198,7 @@ static void obj_type_register(lua_State *L, const reg_sub_module *type_reg, int 
 	reg_list = type_reg->pub_funcs;
 	if(reg_list != NULL && reg_list[0].name != NULL) {
 		/* register "constructors" as to object's public API */
-		luaL_setfuncs(L, reg_list, 0); /* fill public API table. */
+		nobj_setfuncs(L, reg_list, 0); /* fill public API table. */
 
 		/* make public API table callable as the default constructor. */
 		lua_newtable(L); /* create metatable */
@@ -1227,7 +1228,7 @@ static void obj_type_register(lua_State *L, const reg_sub_module *type_reg, int 
 #endif
 	}
 
-	luaL_setfuncs(L, type_reg->methods, 0); /* fill methods table. */
+	nobj_setfuncs(L, type_reg->methods, 0); /* fill methods table. */
 
 	luaL_newmetatable(L, type->name); /* create metatable */
 	lua_pushliteral(L, ".name");
@@ -1245,7 +1246,7 @@ static void obj_type_register(lua_State *L, const reg_sub_module *type_reg, int 
 	lua_pushvalue(L, -2); /* dup metatable. */
 	lua_rawset(L, priv_table);    /* priv_table["<object_name>"] = metatable */
 
-	luaL_setfuncs(L, type_reg->metas, 0); /* fill metatable */
+	nobj_setfuncs(L, type_reg->metas, 0); /* fill metatable */
 
 	/* add obj_bases to metatable. */
 	while(base->id >= 0) {
@@ -2010,7 +2011,7 @@ LUA_NOBJ_API int luaopen_llthreads(lua_State *L) {
 	luaL_register(L, "llthreads", llthreads_function);
 #else
 	lua_newtable(L);
-	luaL_setfuncs(L, llthreads_function, 0);
+	nobj_setfuncs(L, llthreads_function, 0);
 #endif
 
 	/* register module constants. */
